@@ -9,13 +9,13 @@
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WiFiMulti.h>
-
 #include <ArduinoJson.h>
-
 #include <WebSocketsClient.h>
 #include <SocketIOclient.h>
-
 #include <Hash.h>
+#include <EEPROM.h>
+
+const String BLANK_DEVICE_PASSPHRASE = "YK$gkE%YdFzTbt%NyK%fBN&-z83AP@hV*ey?RfJ8G?Z5WX3@rs!b+*@KUBjGx36tQDMqr5q89NS#w&Ye3F$tr6Yp?Gaj-d79StJD8D-2suhQVwX@jzQ?22P%G#QyfvP&V@q*HG_2QnJ#AA3m+VVGvk_w?#GKE58cF-ZHW$YRrW4Q9uHcsk2AfP5FeUcg$*!_grbV?KV9%Y?Un8MLLSb@mX*=?!dLJ$tHZF*tXMxtVyuPQ@gs2qZk@ZBDQtd&epv+";
 
 ESP8266WiFiMulti WiFiMulti;
 SocketIOclient socketIO;
@@ -24,6 +24,30 @@ SocketIOclient socketIO;
 
 #define led 2
 #define btn 0
+
+String createSampleStatus()
+{
+    // creat JSON message for Socket.IO (event)
+    DynamicJsonDocument doc(1024);
+    JsonArray array = doc.to<JsonArray>();
+
+    // add evnet name
+    // Hint: socket.on('event_name', ....
+    array.add("payload");
+
+    // add payload (parameters) for the event
+    JsonObject param1 = array.createNestedObject();
+    param1["current_temp"] = "37.25";
+    param1["current_humidity"] = "82.36";
+    param1["cycle_profile"] = "chickens";
+    param1["cycle_start_date"] = "22/04/21 18:45:56";
+    param1["cycle_status"] = "running";
+    param1["water_level"] = "good";
+    param1["battery_status"] = "good";
+    String output;
+    serializeJson(doc, output);
+    return output;
+}
 
 void sendMessage(String msg)
 {
@@ -49,20 +73,36 @@ void sendMessage(String msg)
     socketIO.sendEVENT(output);
 }
 
-void eventHandler(String event = "", String data = "") {
+void eventHandler(String event = "", String data = "")
+{
+    USE_SERIAL.println(data);
+    StaticJsonDocument<1024> doc;
+    // Deserialize the JSON document
+    DeserializationError error = deserializeJson(doc, data);
+
+    // Test if parsing succeeds.
+    if (error)
+    {
+        return;
+    }
     if (event == "set")
     {
         if (data == "0")
         {
             digitalWrite(led, LOW);
             sendMessage("led is off");
-        } else {
+        }
+        else
+        {
             digitalWrite(led, HIGH);
             sendMessage("led is on");
         }
-        
-    }   
-    
+    }
+    else if (event == "register")
+    {
+        String name = doc["name"];
+        USE_SERIAL.println(name);
+    }
 }
 
 void eventParser(uint8_t *payload, size_t length)
@@ -77,7 +117,7 @@ void eventParser(uint8_t *payload, size_t length)
         if (payload[i] != ',' && split)
         {
             event += (char)payload[i];
-        }        
+        }
         else if (payload[i] == ',' && split)
         {
             split = false;
@@ -88,7 +128,7 @@ void eventParser(uint8_t *payload, size_t length)
         }
     }
     event.remove(event.length() - 1);
-    data.remove(0,1);
+    data.remove(0, 1);
     eventHandler(event, data);
     // USE_SERIAL.println("Event: " + event + "\n" + "Data: " + data + "\n");
 }
@@ -134,6 +174,7 @@ void socketIOEvent(socketIOmessageType_t type, uint8_t *payload, size_t length)
 
 void setup()
 {
+    EEPROM.begin(512);
     pinMode(led, OUTPUT);
     digitalWrite(led, LOW);
     // USE_SERIAL.begin(921600);
@@ -191,6 +232,7 @@ void loop()
     if (now - messageTimestamp > 10000)
     {
         messageTimestamp = now;
+        sendMessage(createSampleStatus());
         // Print JSON for debugging
         // USE_SERIAL.println(output);
     }
