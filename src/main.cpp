@@ -1,10 +1,3 @@
-/*
- * WebSocketClientSocketIO.ino
- *
- *  Created on: 06.06.2016
- *
- */
-
 #include <Arduino.h>
 
 #include <ESP8266WiFi.h>
@@ -21,7 +14,7 @@ ESP8266WiFiMulti WiFiMulti;
 SocketIOclient socketIO;
 
 #define USE_SERIAL Serial
-
+uint8_t counter=0;
 #define led 2
 #define btn 0
 
@@ -37,7 +30,7 @@ String createSampleStatus()
 
     // add payload (parameters) for the event
     JsonObject param1 = array.createNestedObject();
-    param1["current_temp"] = "37.25";
+    param1["current_temp"] = String(counter++);
     param1["current_humidity"] = "82.36";
     param1["cycle_profile"] = "chickens";
     param1["cycle_start_date"] = "22/04/21 18:45:56";
@@ -75,7 +68,6 @@ void sendMessage(String msg)
 
 void eventHandler(String event = "", String data = "")
 {
-    USE_SERIAL.println(data);
     StaticJsonDocument<1024> doc;
     // Deserialize the JSON document
     DeserializationError error = deserializeJson(doc, data);
@@ -87,15 +79,15 @@ void eventHandler(String event = "", String data = "")
     }
     if (event == "set")
     {
-        if (data == "0")
+        if (data == "1")
         {
             digitalWrite(led, LOW);
-            sendMessage("led is off");
+            sendMessage("led is on");
         }
         else
         {
             digitalWrite(led, HIGH);
-            sendMessage("led is on");
+            sendMessage("led is off");
         }
     }
     else if (event == "register")
@@ -112,6 +104,7 @@ void eventParser(uint8_t *payload, size_t length)
     String event;
     String data;
     bool split = true;
+    //{"set","0"}
     for (size_t i = 2; i < length - 2; i++)
     {
         if (payload[i] != ',' && split)
@@ -213,7 +206,7 @@ void setup()
     USE_SERIAL.printf("[SETUP] WiFi Connected %s\n", ip.c_str());
 
     // server address, port and URL
-    socketIO.begin("192.168.149.218", 5050);
+    socketIO.begin("192.168.149.219", 5050);
 
     // register connection within the server
     // registerConnection();
@@ -229,7 +222,7 @@ void loop()
 
     uint64_t now = millis();
 
-    if (now - messageTimestamp > 10000)
+    if (now - messageTimestamp > 1000)
     {
         messageTimestamp = now;
         sendMessage(createSampleStatus());
