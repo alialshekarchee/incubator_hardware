@@ -1,22 +1,38 @@
 #include <Arduino.h>
-
 #include <ESP8266WiFi.h>
-#include <ESP8266WiFiMulti.h>
 #include <ArduinoJson.h>
 #include <WebSocketsClient.h>
 #include <SocketIOclient.h>
 #include <Hash.h>
 #include <EEPROM.h>
+#include <WiFiManager.h>
+
+// include MDNS
+#ifdef ESP8266
+#include <ESP8266mDNS.h>
+#elif defined(ESP32)
+#include <ESPmDNS.h>
+#endif
+
+// select which pin will trigger the configuration portal when set to LOW
+#define TRIGGER_PIN 0
+
+WiFiManager wm;
+
+unsigned int timeout = 120; // seconds to run for
+unsigned int startTime = millis();
+bool portalRunning = false;
+bool startAP = false; // start AP and webserver if true, else start only webserver
 
 const String BLANK_DEVICE_PASSPHRASE = "YK$gkE%YdFzTbt%NyK%fBN&-z83AP@hV*ey?RfJ8G?Z5WX3@rs!b+*@KUBjGx36tQDMqr5q89NS#w&Ye3F$tr6Yp?Gaj-d79StJD8D-2suhQVwX@jzQ?22P%G#QyfvP&V@q*HG_2QnJ#AA3m+VVGvk_w?#GKE58cF-ZHW$YRrW4Q9uHcsk2AfP5FeUcg$*!_grbV?KV9%Y?Un8MLLSb@mX*=?!dLJ$tHZF*tXMxtVyuPQ@gs2qZk@ZBDQtd&epv+";
 
-ESP8266WiFiMulti WiFiMulti;
 SocketIOclient socketIO;
 
 #define USE_SERIAL Serial
-uint8_t counter=0;
-#define led 2
-#define btn 0
+uint8_t counter = 0;
+#define OUTPUT_PIN 2
+#define TRIGGER_PIN 0
+unsigned long messageTimestamp = 0;
 
 String createSampleStatus()
 {
@@ -81,12 +97,12 @@ void eventHandler(String event = "", String data = "")
     {
         if (data == "1")
         {
-            digitalWrite(led, LOW);
+            digitalWrite(OUTPUT_PIN, LOW);
             sendMessage("led is on");
         }
         else
         {
-            digitalWrite(led, HIGH);
+            digitalWrite(OUTPUT_PIN, HIGH);
             sendMessage("led is off");
         }
     }
@@ -165,68 +181,95 @@ void socketIOEvent(socketIOmessageType_t type, uint8_t *payload, size_t length)
     }
 }
 
+void doWiFiManager()
+{
+    // is auto timeout portal running
+    if (portalRunning)
+    {
+        wm.process(); // do processing
+
+        // check for timeout
+        if ((millis() - startTime) > (timeout * 1000))
+        {
+            Serial.println("portaltimeout");
+            portalRunning = false;
+            if (startAP)
+            {
+                wm.stopConfigPortal();
+            }
+            else
+            {
+                wm.stopWebPortal();
+            }
+        }
+    }
+
+    // is configuration portal requested?
+    if (digitalRead(TRIGGER_PIN) == LOW && (!portalRunning))
+    {
+        if (startAP)
+        {
+            Serial.println("Button Pressed, Starting Config Portal");
+            wm.setConfigPortalBlocking(false);
+            wm.startConfigPortal();
+        }
+        else
+        {
+            Serial.println("Button Pressed, Starting Web Portal");
+            wm.startWebPortal();
+        }
+        portalRunning = true;
+        startTime = millis();
+    }
+}
+
+void configModeCallback (WiFiManager *myWiFiManager) {
+  Serial.println("Entered config mode");
+  Serial.println(WiFi.softAPIP());
+
+  Serial.println(myWiFiManager->getConfigPortalSSID());
+}
+
 void setup()
 {
-    EEPROM.begin(512);
-    pinMode(led, OUTPUT);
-    digitalWrite(led, LOW);
-    // USE_SERIAL.begin(921600);
+    WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
+                         // put your setup code here, to run once
     USE_SERIAL.begin(9600);
-
-    //Serial.setDebugOutput(true);
     USE_SERIAL.setDebugOutput(true);
+    delay(1000);
+    Serial.println("\n Starting");
 
-    USE_SERIAL.println();
-    USE_SERIAL.println();
-    USE_SERIAL.println();
+    pinMode(TRIGGER_PIN, INPUT_PULLUP);
 
-    for (uint8_t t = 4; t > 0; t--)
-    {
-        USE_SERIAL.printf("[SETUP] BOOT WAIT %d...\n", t);
-        USE_SERIAL.flush();
-        delay(1000);
-    }
-
-    // disable AP
-    if (WiFi.getMode() & WIFI_AP)
-    {
-        WiFi.softAPdisconnect(true);
-    }
-
-    WiFiMulti.addAP("HomeLink", "kuh4n3qf49");
-
-    //WiFi.disconnect();
-    while (WiFiMulti.run() != WL_CONNECTED)
-    {
-        delay(100);
-        USE_SERIAL.print(".");
-    }
-
-    String ip = WiFi.localIP().toString();
-    USE_SERIAL.printf("[SETUP] WiFi Connected %s\n", ip.c_str());
+    // wm.resetSettings();
+    wm.setHostname("Incubator");
+    // wm.setEnableConfigPortal(false);
+    // wm.setConfigPortalBlocking(false);
+    wm.setAPCallback(configModeCallback);
+    wm.autoConnect();
+    pinMode(OUTPUT_PIN, OUTPUT);
+    digitalWrite(OUTPUT_PIN, LOW);
 
     // server address, port and URL
     socketIO.begin("192.168.149.219", 5050);
-
-    // register connection within the server
-    // registerConnection();
 
     // event handler
     socketIO.onEvent(socketIOEvent);
 }
 
-unsigned long messageTimestamp = 0;
 void loop()
 {
     socketIO.loop();
-
     uint64_t now = millis();
-
     if (now - messageTimestamp > 1000)
     {
         messageTimestamp = now;
         sendMessage(createSampleStatus());
-        // Print JSON for debugging
-        // USE_SERIAL.println(output);
     }
+
+#ifdef ESP8266
+    MDNS.update();
+#endif
+    doWiFiManager();
+    // put your main code here, to run repeatedly:
 }
