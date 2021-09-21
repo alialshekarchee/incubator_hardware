@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Wire.h>
 #include <ESP8266WiFi.h>
 #include <ArduinoJson.h>
 #include <WebSocketsClient.h>
@@ -6,6 +7,7 @@
 #include <Hash.h>
 #include <EEPROM.h>
 #include <WiFiManager.h>
+#include <Arduino_JSON.h>
 
 // include MDNS
 #ifdef ESP8266
@@ -30,9 +32,133 @@ SocketIOclient socketIO;
 
 #define USE_SERIAL Serial
 uint8_t counter = 0;
-#define OUTPUT_PIN 2
-#define TRIGGER_PIN 0
+// #define OUTPUT_PIN 2
+// #define TRIGGER_PIN 0
 unsigned long messageTimestamp = 0;
+void sendMessage(String);
+
+String jsondata = "";
+String jsonparameter = "";
+JSONVar dataObject;
+JSONVar param;
+
+struct data_Rx_from_Arduino_toesp
+{ /////12 data 16 byte total
+    float TEMP;
+    uint16_t year;
+    uint8_t HUMI;
+    uint8_t COUNTER;
+    uint8_t DAYS;
+    uint8_t second;
+    uint8_t minuts;
+    uint8_t hours;
+    uint8_t day_inweek;
+    uint8_t day_inmonth;
+    uint8_t month_inyear;
+    uint8_t GROP;
+    /// GROP= 0, 0, FAN, BATT, DOOR,LAMP,WATER,EGG
+    ////////  D7,D6, D5,  D4,  D3,  D2,  D1,   D0
+} sensors = {0.0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+struct parameter_from_Arduino_toesp
+{
+    float SETTMP;
+    float TMPHI;
+    float TMPLO;
+    uint8_t PERIOD; //IN HOURS
+    uint8_t HHI;
+    uint8_t HLO;
+    uint8_t HACHIN;
+    bool TURN;
+    ///RTC data
+    uint8_t YEAR;
+    uint8_t MONTH;
+    uint8_t DAY;
+    uint8_t HOUR;
+    uint8_t MINUT;
+} ini_values = {0.0f, 0.0f, 0.0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+struct tosaveinarduino
+{
+    uint8_t SIGNAL;
+    float SETTMP;
+    float TMPHI;
+    float TMPLO;
+    uint8_t PERIOD; //IN HOURS
+    uint8_t HHI;
+    uint8_t HLO;
+    uint8_t HACHIN;
+    bool TURN;
+    ///RTC data
+    uint8_t YEAR;
+    uint8_t MONTH;
+    uint8_t DAY;
+    uint8_t HOUR;
+    uint8_t MINUT;
+} toarduino = {'s', 0.0f, 0.0f, 0.0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+void data_Creation()
+{
+    dataObject["TEMP"] = sensors.TEMP;
+    dataObject["YEAR"] = sensors.year;
+    dataObject["HUMI"] = sensors.HUMI;
+    dataObject["COUNTER"] = sensors.COUNTER;
+    dataObject["DAYS"] = sensors.DAYS;
+    dataObject["SEC"] = sensors.second;
+    dataObject["MINUT"] = sensors.minuts;
+    dataObject["HOURS"] = sensors.hours;
+    dataObject["DINW"] = sensors.day_inweek;
+    dataObject["DINM"] = sensors.day_inmonth;
+    dataObject["MONTH"] = sensors.month_inyear;
+    dataObject["GROP"] = sensors.GROP;
+    jsondata = JSON.stringify(dataObject);
+}
+
+void param_Creation()
+{
+    param["SETTMP"] = ini_values.SETTMP;
+    param["TMPHI"] = ini_values.TMPHI;
+    param["TMPLO"] = ini_values.TMPLO;
+    param["PERIOD"] = ini_values.PERIOD;
+    param["HHI"] = ini_values.HHI;
+    param["HLO"] = ini_values.HLO;
+    param["HACHIN"] = ini_values.HACHIN;
+    param["TURN"] = ini_values.TURN;
+    //////////////
+    param["YEAR"] = ini_values.YEAR;
+    param["MONTH"] = ini_values.MONTH;
+    param["DAY"] = ini_values.DAY;
+    param["HOUR"] = ini_values.HOUR;
+    param["MINUT"] = ini_values.MINUT;
+    jsonparameter = JSON.stringify(param);
+}
+
+void getData()
+{
+    char da = 'd';
+    Wire.beginTransmission(8);
+    Wire.write(da);
+    Wire.endTransmission();
+    Wire.requestFrom(8, sizeof(sensors));
+    Wire.readBytes((byte *)&sensors, sizeof(sensors));
+    data_Creation();
+    sendMessage(jsondata);
+    jsondata = "";
+}
+
+void getParameters()
+{
+    char da = 'p';
+    Wire.beginTransmission(8);
+    Wire.write(da);
+    Wire.endTransmission();
+    Wire.requestFrom(8, sizeof(ini_values));
+    Wire.readBytes((byte *)&ini_values, sizeof(ini_values));
+    param_Creation();
+    sendMessage(jsonparameter);
+    jsonparameter = "";
+}
+
 
 String createSampleStatus()
 {
@@ -97,12 +223,12 @@ void eventHandler(String event = "", String data = "")
     {
         if (data == "1")
         {
-            digitalWrite(OUTPUT_PIN, LOW);
+            // digitalWrite(OUTPUT_PIN, LOW);
             sendMessage("led is on");
         }
         else
         {
-            digitalWrite(OUTPUT_PIN, HIGH);
+            // digitalWrite(OUTPUT_PIN, HIGH);
             sendMessage("led is off");
         }
     }
@@ -205,22 +331,22 @@ void doWiFiManager()
     }
 
     // is configuration portal requested?
-    if (digitalRead(TRIGGER_PIN) == LOW && (!portalRunning))
-    {
-        if (startAP)
-        {
-            Serial.println("Button Pressed, Starting Config Portal");
-            wm.setConfigPortalBlocking(false);
-            wm.startConfigPortal();
-        }
-        else
-        {
-            Serial.println("Button Pressed, Starting Web Portal");
-            wm.startWebPortal();
-        }
-        portalRunning = true;
-        startTime = millis();
-    }
+    // if (digitalRead(TRIGGER_PIN) == LOW && (!portalRunning))
+    // {
+    //     if (startAP)
+    //     {
+    //         Serial.println("Button Pressed, Starting Config Portal");
+    //         wm.setConfigPortalBlocking(false);
+    //         wm.startConfigPortal();
+    //     }
+    //     else
+    //     {
+    //         Serial.println("Button Pressed, Starting Web Portal");
+    //         wm.startWebPortal();
+    //     }
+    //     portalRunning = true;
+    //     startTime = millis();
+    // }
 }
 
 void configModeCallback (WiFiManager *myWiFiManager) {
@@ -233,22 +359,24 @@ void configModeCallback (WiFiManager *myWiFiManager) {
 void setup()
 {
     WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
-                         // put your setup code here, to run once
+    Wire.begin(0,2);
     USE_SERIAL.begin(9600);
     USE_SERIAL.setDebugOutput(true);
     delay(1000);
     Serial.println("\n Starting");
 
-    pinMode(TRIGGER_PIN, INPUT_PULLUP);
+    // pinMode(TRIGGER_PIN, INPUT_PULLUP);
 
     // wm.resetSettings();
     wm.setHostname("Incubator");
     // wm.setEnableConfigPortal(false);
     // wm.setConfigPortalBlocking(false);
     wm.setAPCallback(configModeCallback);
+    wm.setCaptivePortalEnable(true);
+    wm.setDarkMode(true);
     wm.autoConnect();
-    pinMode(OUTPUT_PIN, OUTPUT);
-    digitalWrite(OUTPUT_PIN, LOW);
+    // pinMode(OUTPUT_PIN, OUTPUT);
+    // digitalWrite(OUTPUT_PIN, LOW);
 
     // server address, port and URL
     socketIO.begin("192.168.149.219", 5050);
@@ -264,12 +392,13 @@ void loop()
     if (now - messageTimestamp > 1000)
     {
         messageTimestamp = now;
-        sendMessage(createSampleStatus());
+        // sendMessage(createSampleStatus());
+        getParameters();
+        getData();
     }
 
 #ifdef ESP8266
     MDNS.update();
 #endif
     doWiFiManager();
-    // put your main code here, to run repeatedly:
 }
