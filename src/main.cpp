@@ -37,11 +37,6 @@ uint8_t counter = 0;
 unsigned long messageTimestamp = 0;
 void sendMessage(String);
 
-String jsondata = "";
-String jsonparameter = "";
-JSONVar dataObject;
-JSONVar param;
-
 struct data_Rx_from_Arduino_toesp
 { /////12 data 16 byte total
     float TEMP;
@@ -97,8 +92,9 @@ struct tosaveinarduino
     uint8_t MINUT;
 } toarduino = {'s', 0.0f, 0.0f, 0.0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-void data_Creation()
+String createDataSet()
 {
+    JSONVar dataObject;
     dataObject["TEMP"] = sensors.TEMP;
     dataObject["YEAR"] = sensors.year;
     dataObject["HUMI"] = sensors.HUMI;
@@ -111,11 +107,12 @@ void data_Creation()
     dataObject["DINM"] = sensors.day_inmonth;
     dataObject["MONTH"] = sensors.month_inyear;
     dataObject["GROP"] = sensors.GROP;
-    jsondata = JSON.stringify(dataObject);
+    return JSON.stringify(dataObject);
 }
 
-void param_Creation()
+String createParameterSet()
 {
+    JSONVar param;
     param["SETTMP"] = ini_values.SETTMP;
     param["TMPHI"] = ini_values.TMPHI;
     param["TMPLO"] = ini_values.TMPLO;
@@ -130,10 +127,10 @@ void param_Creation()
     param["DAY"] = ini_values.DAY;
     param["HOUR"] = ini_values.HOUR;
     param["MINUT"] = ini_values.MINUT;
-    jsonparameter = JSON.stringify(param);
+    return JSON.stringify(param);
 }
 
-void getData()
+String getData()
 {
     char da = 'd';
     Wire.beginTransmission(8);
@@ -141,12 +138,10 @@ void getData()
     Wire.endTransmission();
     Wire.requestFrom(8, sizeof(sensors));
     Wire.readBytes((byte *)&sensors, sizeof(sensors));
-    data_Creation();
-    sendMessage(jsondata);
-    jsondata = "";
+    return createDataSet();
 }
 
-void getParameters()
+String getParameters()
 {
     char da = 'p';
     Wire.beginTransmission(8);
@@ -154,11 +149,8 @@ void getParameters()
     Wire.endTransmission();
     Wire.requestFrom(8, sizeof(ini_values));
     Wire.readBytes((byte *)&ini_values, sizeof(ini_values));
-    param_Creation();
-    sendMessage(jsonparameter);
-    jsonparameter = "";
+    return createParameterSet();
 }
-
 
 String createSampleStatus()
 {
@@ -210,32 +202,33 @@ void sendMessage(String msg)
 
 void eventHandler(String event = "", String data = "")
 {
-    StaticJsonDocument<1024> doc;
-    // Deserialize the JSON document
-    DeserializationError error = deserializeJson(doc, data);
+    StaticJsonDocument<1024> dataObj;
+    DeserializationError error = deserializeJson(dataObj, data);
 
-    // Test if parsing succeeds.
-    if (error)
+    if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+    
+    if (event == "payload")
     {
-        return;
-    }
-    if (event == "set")
-    {
-        if (data == "1")
+        if (dataObj["CMD"] == "getParameters")
         {
-            // digitalWrite(OUTPUT_PIN, LOW);
-            sendMessage("led is on");
+            sendMessage(getParameters());
         }
-        else
+        else if (dataObj["CMD"] == "setParameters")
         {
-            // digitalWrite(OUTPUT_PIN, HIGH);
-            sendMessage("led is off");
+            USE_SERIAL.println("setting parameters");
+            String dataset = dataObj["DATASET"];
+            USE_SERIAL.println(dataset);
+            sendMessage("setting parameters");
         }
-    }
-    else if (event == "register")
-    {
-        String name = doc["name"];
-        USE_SERIAL.println(name);
+        else if (dataObj["CMD"] == "getData")
+        {
+            USE_SERIAL.println("Sending Data");
+            sendMessage(getData());
+        }
     }
 }
 
@@ -265,7 +258,7 @@ void eventParser(uint8_t *payload, size_t length)
     event.remove(event.length() - 1);
     data.remove(0, 1);
     eventHandler(event, data);
-    // USE_SERIAL.println("Event: " + event + "\n" + "Data: " + data + "\n");
+    USE_SERIAL.println("Event: " + event + "\n" + "Data: " + data + "\n");
 }
 
 void socketIOEvent(socketIOmessageType_t type, uint8_t *payload, size_t length)
@@ -349,17 +342,18 @@ void doWiFiManager()
     // }
 }
 
-void configModeCallback (WiFiManager *myWiFiManager) {
-  Serial.println("Entered config mode");
-  Serial.println(WiFi.softAPIP());
+void configModeCallback(WiFiManager *myWiFiManager)
+{
+    Serial.println("Entered config mode");
+    Serial.println(WiFi.softAPIP());
 
-  Serial.println(myWiFiManager->getConfigPortalSSID());
+    Serial.println(myWiFiManager->getConfigPortalSSID());
 }
 
 void setup()
 {
     WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
-    Wire.begin(0,2);
+    Wire.begin(0, 2);
     USE_SERIAL.begin(9600);
     USE_SERIAL.setDebugOutput(true);
     delay(1000);
@@ -389,12 +383,11 @@ void loop()
 {
     socketIO.loop();
     uint64_t now = millis();
-    if (now - messageTimestamp > 1000)
+    if (now - messageTimestamp > 10000)
     {
         messageTimestamp = now;
         // sendMessage(createSampleStatus());
-        getParameters();
-        getData();
+        // getData();
     }
 
 #ifdef ESP8266
